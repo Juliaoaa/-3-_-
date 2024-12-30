@@ -1,0 +1,297 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+using System.Windows.Threading;
+
+namespace курсач_змейка
+{
+    public abstract class GameObject
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
+        public int Size { get; set; }
+
+        public abstract void Draw(Canvas canvas);
+    }
+
+    public class SnakeSegment : GameObject
+    {
+        public SolidColorBrush Color { get; set; }
+
+        public SnakeSegment(Point position, int size, SolidColorBrush color)
+        {
+            X = position.X;
+            Y = position.Y;
+            Size = size;
+            Color = color;
+        }
+
+        public override void Draw(Canvas canvas)
+        {
+            Rectangle rectangle = new Rectangle
+            {
+                Width = Size,
+                Height = Size,
+                Fill = Color
+            };
+            Canvas.SetLeft(rectangle, X * Size);
+            Canvas.SetTop(rectangle, Y * Size);
+            canvas.Children.Add(rectangle);
+        }
+    }
+
+    public class Food : GameObject
+    {
+        public ImageSource ImageSource { get; set; }
+
+        public Food(Point position, int size, string imagePath)
+        {
+            X = position.X;
+            Y = position.Y;
+            Size = size;
+            ImageSource = new BitmapImage(new Uri(imagePath));
+        }
+
+        public override void Draw(Canvas canvas)
+        {
+            Image foodImage = new Image
+            {
+                Width = Size,
+                Height = Size,
+                Source = ImageSource
+            };
+            Canvas.SetLeft(foodImage, X * Size);
+            Canvas.SetTop(foodImage, Y * Size);
+            canvas.Children.Add(foodImage);
+        }
+    }
+
+    public class Snake
+    {
+        public List<SnakeSegment> Segments { get; } = new List<SnakeSegment>();
+        public int Size { get; }
+        public SolidColorBrush Color { get; }
+        public Direction CurrentDirection { get; set; }
+        public int StartX { get; }
+        public int StartY { get; }
+        public Snake(Point startPosition, int size, SolidColorBrush color, Direction direction)
+        {
+            Size = size;
+            Color = color;
+            CurrentDirection = direction;
+            StartX = (int)startPosition.X;
+            StartY = (int)startPosition.Y;
+
+        }
+        public void Draw(Canvas canvas)
+        {
+            foreach (var segment in Segments)
+            {
+                segment.Draw(canvas);
+            }
+        }
+        public void AddSegment(Point position)
+        {
+            SnakeSegment newSegment = new SnakeSegment(position, Size, Color);
+            Segments.Add(newSegment);
+        }
+        public void Move(Canvas canvas)
+        {
+            if (Segments.Count == 0) return;
+            Point newHeadPosition = CalculateNewHeadPosition();
+            for (int i = Segments.Count - 1; i > 0; i--)
+            {
+                Segments[i].X = Segments[i - 1].X;
+                Segments[i].Y = Segments[i - 1].Y;
+            }
+
+            Segments[0].X = newHeadPosition.X;
+            Segments[0].Y = newHeadPosition.Y;
+        }
+
+        private Point CalculateNewHeadPosition()
+        {
+            double left = Segments[0].X;
+            double top = Segments[0].Y;
+
+            Point headCurrentPosition = new Point(left, top);
+            Point newHeadPosition = new Point();
+
+            var directionCalculators = new Dictionary<Direction, Func<Point, Point>>
+        {
+            { Direction.Left,  (current) => new Point(current.X - 1, current.Y) },
+            { Direction.Right, (current) => new Point(current.X + 1, current.Y) },
+            { Direction.Top,   (current) => new Point(current.X, current.Y - 1) },
+            { Direction.Bottom,(current) => new Point(current.X, current.Y + 1) }
+        };
+
+            if (directionCalculators.TryGetValue(CurrentDirection, out var calculator))
+            {
+                newHeadPosition = calculator(headCurrentPosition);
+            }
+
+            return newHeadPosition;
+        }
+        public void Reset()
+        {
+            Segments.Clear();
+            AddSegment(new Point(StartX, StartY));
+
+        }
+    }
+
+    public enum Direction
+    {
+        Left, Right, Top, Bottom
+    }
+
+    public partial class MainWindow : Window
+    {
+        private const int SnakeSquareSize = 30;
+        private const int TimerInterval = 100;
+        private readonly SolidColorBrush _snakeColor = Brushes.Green;
+        private static readonly Random randomPozitionFood = new Random();
+        private DispatcherTimer _timer;
+        private Snake _snake;
+        private Food _food;
+        private int _score = 0;
+
+
+        public MainWindow()
+        {
+            InitializeComponent();
+            GameCanvas.Loaded += GameCanvas_Loaded;
+            KeyDown += Window_KeyDown;
+
+        }
+
+        private void GameCanvas_Loaded(object sender, RoutedEventArgs e)
+        {
+            InitialGame();
+        }
+
+        private void InitialGame()
+        {
+            _snake = new Snake(new Point(5, 5), SnakeSquareSize, _snakeColor, Direction.Right);
+            _snake.AddSegment(new Point(5, 5));
+            PlaceFood();
+
+            _timer = new DispatcherTimer();
+            _timer.Tick += Timer_Tick;
+            _timer.Interval = TimeSpan.FromMilliseconds(TimerInterval);
+            _timer.Start();
+        }
+
+        private void Timer_Tick(object sender, EventArgs e)
+        {
+
+            CheckCollisions();
+            _snake.Move(GameCanvas);
+            Redraw();
+        }
+        private void CheckCollisions()
+        {
+            if (_snake.Segments.Count == 0)
+                return;
+
+            Point newHeadPosition = new Point(_snake.Segments[0].X, _snake.Segments[0].Y);
+
+            if (newHeadPosition.X < 0 || newHeadPosition.Y < 0
+               || newHeadPosition.X >= GameCanvas.ActualWidth / SnakeSquareSize
+               || newHeadPosition.Y >= GameCanvas.ActualHeight / SnakeSquareSize)
+            {
+                EndGame();
+                return;
+            }
+            for (int i = 1; i < _snake.Segments.Count; i++)
+            {
+                Point currentPos = new Point(_snake.Segments[0].X, _snake.Segments[0].Y);
+                Point nextPos = new Point(_snake.Segments[i].X, _snake.Segments[i].Y);
+                if (currentPos.X == nextPos.X && currentPos.Y == nextPos.Y)
+                {
+                    EndGame();
+                    return;
+                }
+            }
+            if (newHeadPosition.X == _food.X && newHeadPosition.Y == _food.Y)
+            {
+                EatFood();
+                PlaceFood();
+            }
+
+
+        }
+
+        private void Redraw()
+        {
+            GameCanvas.Children.Clear();
+            _snake.Draw(GameCanvas);
+
+            _food.Draw(GameCanvas);
+
+        }
+        private void EndGame()
+        {
+            _timer.Stop();
+            RestartButton.Visibility = Visibility.Visible;
+        }
+        private void EatFood()
+        {
+            _score++;
+            ScoreTextBlock.Text = "Score: " + _score;
+            _snake.AddSegment(new Point(_food.X, _food.Y));
+        }
+        private void PlaceFood()
+        {
+            int maxX = (int)(GameCanvas.ActualWidth / SnakeSquareSize);
+            int maxY = (int)(GameCanvas.ActualHeight / SnakeSquareSize);
+
+            int foodX = randomPozitionFood.Next(0, maxX);
+            int foodY = randomPozitionFood.Next(0, maxY);
+
+            _food = new Food(new Point(foodX, foodY), SnakeSquareSize, "C:\\Users\\user\\source\\repos\\курсач змейка\\курсач змейка\\images\\apple.jpg");
+
+        }
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            var directionMap = new Dictionary<Key, Direction>
+        {
+            { Key.Up, Direction.Top },
+            { Key.Down, Direction.Bottom },
+            { Key.Left, Direction.Left },
+            { Key.Right, Direction.Right }
+        };
+
+            var oppositeDirectionMap = new Dictionary<Direction, Direction>
+        {
+            { Direction.Top, Direction.Bottom },
+            { Direction.Bottom, Direction.Top },
+            { Direction.Left, Direction.Right },
+            { Direction.Right, Direction.Left }
+        };
+
+            if (directionMap.TryGetValue(e.Key, out var newDirection))
+            {
+                if (_snake.CurrentDirection != oppositeDirectionMap[newDirection])
+                {
+                    _snake.CurrentDirection = newDirection;
+                }
+            }
+        }
+        private void RestartButton_Click(object sender, RoutedEventArgs e)
+        {
+            _score = 0;
+            ScoreTextBlock.Text = "Score: 0";
+            _snake.Reset();
+
+            RestartButton.Visibility = Visibility.Collapsed;
+            InitialGame();
+        }
+    }
+}
